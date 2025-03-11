@@ -206,7 +206,7 @@ def main():
     print(f"Conversion completed successfully! MP4 file saved as: {mp4_output_file}")
     
     try:
-        send_message("Movies", f"The movie {output_file_name} has been ripped and encoded\n")
+        send_message("Movies", f"The movie {output_file_name} has been ripped and encoded\nTotal Duration: {time.time() - start} seconds\nRipping Duration: {rip_end - start} seconds\nEncoding Duraction: {encode_end - start} seconds\n")
     except Exception as e:
         print("Warning: Failed to send encoding notification:", e)
     
