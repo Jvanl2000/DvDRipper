@@ -7,6 +7,8 @@ import requests
 from tqdm import tqdm
 import threading
 
+ATTEMPTS = 3
+
 def send_message(title, message):
     """Send a notification"""
     requests.post("https://api.example.com/Movies",
@@ -78,8 +80,7 @@ def poll_file_size_progress(expected_file_size, output_directory, progress_bar, 
             # Assume the largest file is the one being written.
             current_file = max(mkv_files, key=os.path.getsize)
             try:
-                current_size = os.path.getsize(current_file)
-                progress = int(min((current_size / expected_file_size) * 100, 100))
+                progress = os.path.getsize(current_file)
                 if progress > current_progress:
                     progress_bar.n = progress
                     progress_bar.refresh()
@@ -98,7 +99,7 @@ def rip_dvd(title_index, output_file_name, output_directory, expected_file_size,
         command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
     
-    progress_bar = tqdm(total=100, desc="Ripping DVD", unit="%", dynamic_ncols=True)
+    progress_bar = tqdm(total=expected_file_size, desc="Ripping DVD", unit="%", dynamic_ncols=True)
     stop_event = threading.Event()
     
     monitor_thread = threading.Thread(
@@ -115,7 +116,7 @@ def rip_dvd(title_index, output_file_name, output_directory, expected_file_size,
     stop_event.set()
     monitor_thread.join()
     
-    progress_bar.n = 100
+    progress_bar.n = expected_file_size
     progress_bar.refresh()
     progress_bar.close()
     
@@ -162,49 +163,50 @@ def encode_to_mp4(new_file_path, output_file_name, output_directory):
     
     return mp4_output_file
 
+def run(function, *args, **kwargs):
+    for i in range(1, ATTEMPTS + 1):
+        try:
+            output = function(*args, **kwargs)
+        except Exception as e:
+            if i < ATTEMPTS:
+                continue
+            else:
+                error_handler(f"Error running: {function.__name__}\nAttempts: {ATTEMPTS}\nError: {e}")
+        return output
+
 def main():
-    try:
-        output_file_name = input("Enter the output file name (without extension): ").strip()
-        drive_letter = input("Enter the DVD drive letter (without colon): ").strip()
-    except Exception as e:
-        error_handler("Error reading input: " + str(e))
+    output_file_name = input("Enter the output file name (without extension): ").strip()
+    drive_letter = input("Enter the DVD drive letter (without colon): ").strip()
     
     output_directory = os.path.join("temp", drive_letter)
     if not os.path.exists(output_directory):
         try:
             os.makedirs(output_directory)
         except Exception as e:
-            error_handler("Error creating output directory: " + str(e))
+            error_handler("Error creating temp directory: " + str(e))
     
     print("Getting disc info from MakeMKV...")
-    try:
-        largest_title_index, largest_title_size = get_largest_title(drive_letter)
-    except Exception as e:
-        error_handler(str(e))
-    
+    largest_title_index, largest_title_size = run(get_largest_title, drive_letter)
     largest_title_size_gb = round(largest_title_size / 1073741824, 2)
     print(f"Largest title found: Title {largest_title_index} with size: {largest_title_size_gb} GB")
-    
+
     print(f"Ripping largest title (Title {largest_title_index}) to output directory...")
+    start = time.time()
+    new_file_path = run(rip_dvd, largest_title_index, output_file_name, output_directory, largest_title_size, drive_letter)
+    rip_end = time.time()
+
     try:
-        new_file_path = rip_dvd(largest_title_index, output_file_name, output_directory, largest_title_size, drive_letter)
-    except Exception as e:
-        error_handler(str(e))
-    
-    try:
-        send_message("Movies", "Movie has been ripped!")
+        send_message("Movies", f"Movie {output_file_name} has been ripped!\nDuration: {time.time() - rip_end} seconds")
     except Exception as e:
         print("Warning: Failed to send rip notification:", e)
     
-    try:
-        mp4_output_file = encode_to_mp4(new_file_path, output_file_name, output_directory)
-    except Exception as e:
-        error_handler(str(e))
-    
+    mp4_output_file = run(encode_to_mp4, new_file_path, output_file_name, output_directory)
+    encode_end = time.time()
+
     print(f"Conversion completed successfully! MP4 file saved as: {mp4_output_file}")
     
     try:
-        send_message("Movies", "Movie has been encoded!")
+        send_message("Movies", f"The movie {output_file_name} has been ripped and encoded\n")
     except Exception as e:
         print("Warning: Failed to send encoding notification:", e)
     
@@ -233,7 +235,7 @@ def main():
     print("Restarting the program...")
     time.sleep(2)
     os.system('cls' if os.name == 'nt' else 'clear')
-    os.execv(sys.executable, [sys.executable] + sys.argv)
+    main()
 
 if __name__ == "__main__":
     try:
